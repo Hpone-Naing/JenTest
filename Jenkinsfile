@@ -54,12 +54,8 @@ pipeline {
                     $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" 2>$null
                     if (-not $siteExists) {
                         Write-Host "Creating IIS Site: $siteName"
-                        # Create the site
                         & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" add site /name:"$siteName" /id:1 /physicalPath:"$sitePath" /bindings:"http://*:${sitePort}:"
-                        
-                        # Set the application pool for the site
                         & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" set site /site.name:"$siteName" /applicationPool:"$appPoolName"
-                        
                         Write-Host "IIS Site created: $siteName on port $sitePort"
                     } else {
                         Write-Host "IIS Site already exists: $siteName"
@@ -117,12 +113,27 @@ pipeline {
         stage('Start IIS Site') {
             steps {
                 powershell '''
-                    $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"jentest" 2>$null
+                    $siteName = "jentest"
+                    $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" 2>$null
                     if ($siteExists) {
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" start site /site.name:"jentest"
-                        Write-Host "Site started"
+                        # Check current site state
+                        $siteInfo = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" /text:state
+                        Write-Host "Current site state: $siteInfo"
+                        
+                        if ($siteInfo -match "Started") {
+                            Write-Host "Site is already running"
+                        } else {
+                            # Try to start the site
+                            $result = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" start site /site.name:"$siteName" 2>&1
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "Site started successfully"
+                            } else {
+                                Write-Host "Warning: Site start returned: $result"
+                                # Don't fail the pipeline - site might already be starting
+                            }
+                        }
                     } else {
-                        Write-Host "Site not found, cannot start"
+                        Write-Host "Site not found"
                         exit 1
                     }
                 '''
