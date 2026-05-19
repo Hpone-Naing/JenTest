@@ -1,4 +1,4 @@
-pipeline {
+\pipeline {
     agent any
     
     stages {
@@ -26,127 +26,58 @@ pipeline {
             }
         }
         
-        stage('Create IIS Site and App Pool if not exists') {
+        stage('Deploy to IIS') {
             steps {
                 powershell '''
+                    Import-Module WebAdministration -ErrorAction SilentlyContinue
+                    
                     $siteName = "jentest"
                     $appPoolName = "DefaultAppPool"
                     $sitePath = "D:\\jentest"
-                    $sitePort = 8080
+                    $sitePort = 9090
                     
-                    # Create website directory if it doesn't exist
+                    # Create directory if needed
                     if (-not (Test-Path $sitePath)) {
                         New-Item -ItemType Directory -Path $sitePath -Force
-                        Write-Host "Created website directory: $sitePath"
                     }
                     
-                    # Check if App Pool exists
-                    $appPoolExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list apppool /name:"$appPoolName" 2>$null
-                    if (-not $appPoolExists) {
-                        Write-Host "Creating App Pool: $appPoolName"
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" add apppool /name:"$appPoolName" /managedRuntimeVersion:"v4.0"
-                        Write-Host "App Pool created: $appPoolName"
-                    } else {
-                        Write-Host "App Pool already exists: $appPoolName"
+                    # Create App Pool if needed
+                    if (-not (Get-ChildItem IIS:\\AppPools | Where-Object {$_.Name -eq $appPoolName})) {
+                        New-WebAppPool -Name $appPoolName
+                        Write-Host "Created App Pool: $appPoolName"
                     }
                     
-                    # Check if Site exists
-                    $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" 2>$null
-                    if (-not $siteExists) {
-                        Write-Host "Creating IIS Site: $siteName"
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" add site /name:"$siteName" /id:1 /physicalPath:"$sitePath" /bindings:"http://*:${sitePort}:"
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" set site /site.name:"$siteName" /applicationPool:"$appPoolName"
-                        Write-Host "IIS Site created: $siteName on port $sitePort"
+                    # Create Site if needed
+                    if (-not (Get-Website -Name $siteName)) {
+                        New-Website -Name $siteName -Port $sitePort -PhysicalPath $sitePath -ApplicationPool $appPoolName
+                        Write-Host "Created Website: $siteName on port $sitePort"
                     } else {
-                        Write-Host "IIS Site already exists: $siteName"
+                        Write-Host "Website already exists: $siteName"
                     }
-                '''
-            }
-        }
-        
-        stage('Stop IIS Site') {
-            steps {
-                powershell '''
-                    $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"jentest" 2>$null
-                    if ($siteExists) {
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" stop site /site.name:"jentest"
-                        Write-Host "Site stopped"
-                    } else {
-                        Write-Host "Site not found, skipping stop"
-                    }
-                '''
-            }
-        }
-        
-        stage('Stop IIS App Pool') {
-            steps {
-                powershell '''
-                    $appPoolExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list apppool /name:"DefaultAppPool" 2>$null
-                    if ($appPoolExists) {
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" stop apppool /apppool.name:"DefaultAppPool"
-                        Write-Host "App Pool stopped"
-                    } else {
-                        Write-Host "App Pool not found, skipping stop"
-                    }
-                '''
-            }
-        }
-        
-        stage('Publish to folder') {
-            steps {
-                bat 'dotnet publish -c Release -o "D:\\jentest" --no-build'
-            }
-        }
-        
-        stage('Start IIS App Pool') {
-            steps {
-                powershell '''
-                    $appPoolExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list apppool /name:"DefaultAppPool" 2>$null
-                    if ($appPoolExists) {
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" start apppool /apppool.name:"DefaultAppPool"
-                        Write-Host "App Pool started"
-                    }
-                '''
-            }
-        }
-        
-        stage('Start IIS Site') {
-            steps {
-                powershell '''
-                    $siteName = "jentest"
-                    $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" 2>$null
-                    if ($siteExists) {
-                        # Check current site state
-                        $siteInfo = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" /text:state
-                        Write-Host "Current site state: $siteInfo"
-                        
-                        if ($siteInfo -match "Started") {
-                            Write-Host "Site is already running"
-                        } else {
-                            # Try to start the site
-                            $result = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" start site /site.name:"$siteName" 2>&1
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host "Site started successfully"
-                            } else {
-                                Write-Host "Warning: Site start returned: $result"
-                                # Don't fail the pipeline - site might already be starting
-                            }
-                        }
-                    } else {
-                        Write-Host "Site not found"
-                        exit 1
-                    }
+                    
+                    # Stop and start to ensure clean deployment
+                    Stop-Website -Name $siteName -ErrorAction SilentlyContinue
+                    Stop-WebAppPool -Name $appPoolName -ErrorAction SilentlyContinue
+                    
+                    # Publish
+                    dotnet publish -c Release -o "$sitePath" --no-build
+                    
+                    # Start everything
+                    Start-WebAppPool -Name $appPoolName
+                    Start-Website -Name $siteName
+                    
+                    Write-Host "Deployment complete! Site available at http://localhost:$sitePort"
                 '''
             }
         }
     }
     
     post {
-        failure {
-            echo 'Pipeline failed!'
-        }
         success {
             echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
