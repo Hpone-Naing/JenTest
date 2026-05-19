@@ -54,8 +54,12 @@ pipeline {
                     $siteExists = & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" list site /name:"$siteName" 2>$null
                     if (-not $siteExists) {
                         Write-Host "Creating IIS Site: $siteName"
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" add site /name:"$siteName" /physicalPath:"$sitePath" /bindings:"http://*:${sitePort}:"
-                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" set site /site.name:"$siteName" /[path='/'].applicationPool:"$appPoolName"
+                        # Create the site
+                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" add site /name:"$siteName" /id:1 /physicalPath:"$sitePath" /bindings:"http://*:${sitePort}:"
+                        
+                        # Set the application pool for the site
+                        & "$env:SystemRoot\\System32\\inetsrv\\appcmd.exe" set site /site.name:"$siteName" /applicationPool:"$appPoolName"
+                        
                         Write-Host "IIS Site created: $siteName on port $sitePort"
                     } else {
                         Write-Host "IIS Site already exists: $siteName"
