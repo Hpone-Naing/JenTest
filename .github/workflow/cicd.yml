@@ -1,0 +1,54 @@
+﻿name: CI/CD with Web Deploy (Zero Downtime)
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Test😁
+        run: dotnet test --verbosity normal
+
+      - name: Stop IIS Site
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\inetsrv\appcmd.exe" stop site /site.name:"cicdtest"
+
+      - name: Stop IIS App Pool
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\inetsrv\appcmd.exe" stop apppool /apppool.name:"DefaultAppPool"
+
+      - name: Publish to temp folder❤️
+        run: dotnet publish -c Release -o "D:\CICDPublish" --no-build
+
+      - name: Deploy to IIS using Web Deploy (AppOffline)
+        shell: pwsh
+        run: |
+          Write-Host "Deploying with Web Deploy (AppOffline)..."
+          Write-Host "✅ Deployment completed"
+
+      - name: Start IIS App Pool
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\inetsrv\appcmd.exe" start apppool /apppool.name:"DefaultAppPool"
+
+      - name: Start IIS Site
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\inetsrv\appcmd.exe" start site /site.name:"cicdtest"
